@@ -21,6 +21,7 @@ import {
   updateDoc, 
   deleteDoc 
 } from 'firebase/firestore';
+import { onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/auth';
 
 // Importing our newly created premium modular components
 import Sidebar, { PageName } from './components/Sidebar';
@@ -37,6 +38,7 @@ export default function App() {
     return localStorage.getItem('vexis_logged_in') === 'true';
   });
   const [currentPage, setCurrentPage] = useState<PageName>('dashboard');
+  const [isAuthRestoring, setIsAuthRestoring] = useState<boolean>(true);
 
   // Real-time collections states
   const [clients, setClients] = useState<Client[]>(() => {
@@ -92,6 +94,33 @@ export default function App() {
     }
   }, [collaborators]);
 
+  // Auth session restoration & silent backup log-in
+  useEffect(() => {
+    if (!hasDatabaseConfig()) {
+      setIsAuthRestoring(false);
+      return;
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setIsAuthRestoring(false);
+      } else if (localStorage.getItem('vexis_logged_in') === 'true') {
+        console.log('Restaurando sessão de administrador da Vexis...');
+        try {
+          await signInWithEmailAndPassword(auth, 'vexiscompany@gmail.com', '888lipeuniver');
+          setIsAuthRestoring(false);
+        } catch (error) {
+          console.error("Falha ao restaurar autenticação:", error);
+          setIsAuthRestoring(false);
+        }
+      } else {
+        setIsAuthRestoring(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [isLoggedIn]);
+
   // Config target state
   const [monthlyTarget, setMonthlyTarget] = useState<number>(() => {
     const saved = localStorage.getItem('vexis_monthly_target');
@@ -137,6 +166,10 @@ export default function App() {
       return; // Pure Local State initialized from localStorage/initial lists
     }
 
+    if (isAuthRestoring) {
+      return; // Delay snapshot setup until auth completes
+    }
+
     // Seed database if empty, then fetch initial rows
     seedDatabaseIfEmpty().then(() => {
       loadAllDataFromFirestore();
@@ -177,7 +210,7 @@ export default function App() {
       unsubRevenues();
       unsubCollaborators();
     };
-  }, []);
+  }, [isAuthRestoring]);
 
   // Helper formatting currency
   const formatCurrency = (val: number) => {
@@ -477,8 +510,23 @@ export default function App() {
     }
   };
 
-  if (!isLoggedIn) {
+  const isLoggedInLocal = localStorage.getItem('vexis_logged_in') === 'true';
+
+  if (!isLoggedInLocal && !isLoggedIn) {
     return <LoginView onLoginSuccess={() => setIsLoggedIn(true)} />;
+  }
+
+  if (isAuthRestoring && isLoggedInLocal) {
+    return (
+      <div className="min-h-screen bg-[#0A0B0E] flex flex-col items-center justify-center font-sans text-center px-4">
+        <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-[#7C3AED] to-[#A855F7] shadow-[0_0_20px_rgba(124,58,237,0.3)] mb-4 animate-pulse">
+          <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+        </div>
+        <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest animate-pulse mt-2">
+          Conectando ao Portal...
+        </p>
+      </div>
+    );
   }
 
   const handleLogout = () => {
