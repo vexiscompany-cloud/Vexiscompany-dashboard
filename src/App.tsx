@@ -1,6 +1,26 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { supabase, seedDatabaseIfEmpty, hasSupabaseConfig } from './supabase';
+import { 
+  db,
+  auth,
+  seedDatabaseIfEmpty, 
+  hasFirebaseConfig as hasDatabaseConfig,
+  initialClients,
+  initialExpenses,
+  initialRevenues,
+  initialCollaborators,
+  handleFirestoreError,
+  OperationType
+} from './firebase';
 import { Client, Expense, RevenueLog, Collaborator } from './types';
+import { 
+  collection, 
+  getDocs, 
+  onSnapshot, 
+  setDoc, 
+  doc, 
+  updateDoc, 
+  deleteDoc 
+} from 'firebase/firestore';
 
 // Importing our newly created premium modular components
 import Sidebar, { PageName } from './components/Sidebar';
@@ -20,12 +40,57 @@ export default function App() {
 
   // Real-time collections states
   const [clients, setClients] = useState<Client[]>(() => {
-    const isConfigured = hasSupabaseConfig();
-    return isConfigured ? [] : []; // starts empty, populated on mount
+    const isConfigured = hasDatabaseConfig();
+    if (isConfigured) return [];
+    const saved = localStorage.getItem('vexis_demo_clients');
+    return saved ? JSON.parse(saved) : initialClients;
   });
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [revenues, setRevenues] = useState<RevenueLog[]>([]);
-  const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
+
+  const [expenses, setExpenses] = useState<Expense[]>(() => {
+    const isConfigured = hasDatabaseConfig();
+    if (isConfigured) return [];
+    const saved = localStorage.getItem('vexis_demo_expenses');
+    return saved ? JSON.parse(saved) : initialExpenses;
+  });
+
+  const [revenues, setRevenues] = useState<RevenueLog[]>(() => {
+    const isConfigured = hasDatabaseConfig();
+    if (isConfigured) return [];
+    const saved = localStorage.getItem('vexis_demo_revenues');
+    return saved ? JSON.parse(saved) : initialRevenues;
+  });
+
+  const [collaborators, setCollaborators] = useState<Collaborator[]>(() => {
+    const isConfigured = hasDatabaseConfig();
+    if (isConfigured) return [];
+    const saved = localStorage.getItem('vexis_demo_collaborators');
+    return saved ? JSON.parse(saved) : initialCollaborators;
+  });
+
+  // Keep local storage synchronized when in Demo/Sandbox mode
+  useEffect(() => {
+    if (!hasDatabaseConfig()) {
+      localStorage.setItem('vexis_demo_clients', JSON.stringify(clients));
+    }
+  }, [clients]);
+
+  useEffect(() => {
+    if (!hasDatabaseConfig()) {
+      localStorage.setItem('vexis_demo_expenses', JSON.stringify(expenses));
+    }
+  }, [expenses]);
+
+  useEffect(() => {
+    if (!hasDatabaseConfig()) {
+      localStorage.setItem('vexis_demo_revenues', JSON.stringify(revenues));
+    }
+  }, [revenues]);
+
+  useEffect(() => {
+    if (!hasDatabaseConfig()) {
+      localStorage.setItem('vexis_demo_collaborators', JSON.stringify(collaborators));
+    }
+  }, [collaborators]);
 
   // Config target state
   const [monthlyTarget, setMonthlyTarget] = useState<number>(() => {
@@ -39,80 +104,78 @@ export default function App() {
     localStorage.setItem('vexis_monthly_target', target.toString());
   };
 
-  // Function to fetch all data from Supabase DB
-  const loadAllDataFromSupabase = async () => {
-    if (!hasSupabaseConfig()) return;
+  // Function to fetch all data from Firestore DB
+  const loadAllDataFromFirestore = async () => {
+    if (!hasDatabaseConfig()) return;
     try {
-      const [clientsRes, expensesRes, revenuesRes, collRes] = await Promise.all([
-        supabase.from('clients').select('*'),
-        supabase.from('expenses').select('*'),
-        supabase.from('revenues').select('*'),
-        supabase.from('collaborators').select('*')
+      const fetchCollection = async (collectionName: string) => {
+        const snap = await getDocs(collection(db, collectionName));
+        return snap.docs.map(doc => doc.data());
+      };
+
+      const [clientsData, expensesData, revenuesData, collData] = await Promise.all([
+        fetchCollection('clients'),
+        fetchCollection('expenses'),
+        fetchCollection('revenues'),
+        fetchCollection('collaborators')
       ]);
 
-      if (clientsRes.data) setClients(clientsRes.data as Client[]);
-      if (expensesRes.data) setExpenses(expensesRes.data as Expense[]);
-      if (revenuesRes.data) setRevenues(revenuesRes.data as RevenueLog[]);
-      if (collRes.data) setCollaborators(collRes.data as Collaborator[]);
+      setClients(clientsData as Client[]);
+      setExpenses(expensesData as Expense[]);
+      setRevenues(revenuesData as RevenueLog[]);
+      setCollaborators(collData as Collaborator[]);
     } catch (err) {
-      console.error('Error loading data from Supabase:', err);
+      console.error('Error loading data from Firestore:', err);
     }
   };
 
   // 1. Initial Seeding & Real-Time Snapshot Queries Hooks
   useEffect(() => {
-    const isConfigured = hasSupabaseConfig();
+    const isConfigured = hasDatabaseConfig();
     
     if (!isConfigured) {
-      // In Demo Mode, import master lists and populate state
-      import('./supabase').then((module) => {
-        setClients(module.initialClients);
-        setExpenses(module.initialExpenses);
-        setRevenues(module.initialRevenues);
-        setCollaborators(module.initialCollaborators);
-      });
-      return;
+      return; // Pure Local State initialized from localStorage/initial lists
     }
 
     // Seed database if empty, then fetch initial rows
     seedDatabaseIfEmpty().then(() => {
-      loadAllDataFromSupabase();
+      loadAllDataFromFirestore();
     });
 
-    // Real-time postgres subscriptions
-    const clientsChan = supabase
-      .channel('public_clients')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, () => {
-        loadAllDataFromSupabase();
-      })
-      .subscribe();
+    // Real-time Firestore subscriptions with handleFirestoreError safeguards
+    const unsubClients = onSnapshot(collection(db, 'clients'), (snapshot) => {
+      const data = snapshot.docs.map(doc => doc.data() as Client);
+      setClients(data);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'clients');
+    });
 
-    const expensesChan = supabase
-      .channel('public_expenses')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => {
-        loadAllDataFromSupabase();
-      })
-      .subscribe();
+    const unsubExpenses = onSnapshot(collection(db, 'expenses'), (snapshot) => {
+      const data = snapshot.docs.map(doc => doc.data() as Expense);
+      setExpenses(data);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'expenses');
+    });
 
-    const revenuesChan = supabase
-      .channel('public_revenues')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'revenues' }, () => {
-        loadAllDataFromSupabase();
-      })
-      .subscribe();
+    const unsubRevenues = onSnapshot(collection(db, 'revenues'), (snapshot) => {
+      const data = snapshot.docs.map(doc => doc.data() as RevenueLog);
+      setRevenues(data);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'revenues');
+    });
 
-    const collaboratorsChan = supabase
-      .channel('public_collaborators')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'collaborators' }, () => {
-        loadAllDataFromSupabase();
-      })
-      .subscribe();
+    const unsubCollaborators = onSnapshot(collection(db, 'collaborators'), (snapshot) => {
+      const data = snapshot.docs.map(doc => doc.data() as Collaborator);
+      setCollaborators(data);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'collaborators');
+    });
 
     return () => {
-      clientsChan.unsubscribe();
-      expensesChan.unsubscribe();
-      revenuesChan.unsubscribe();
-      collaboratorsChan.unsubscribe();
+      unsubClients();
+      unsubExpenses();
+      unsubRevenues();
+      unsubCollaborators();
     };
   }, []);
 
@@ -173,15 +236,14 @@ export default function App() {
       entryDate: ''
     };
 
-    if (hasSupabaseConfig()) {
+    if (hasDatabaseConfig()) {
       try {
-        const { error: err1 } = await supabase.from('clients').insert([updatedItem]);
-        if (err1) throw err1;
-        const { error: err2 } = await supabase.from('revenues').insert([newRevenue]);
-        if (err2) throw err2;
-        await loadAllDataFromSupabase();
+        await Promise.all([
+          setDoc(doc(db, 'clients', generatedId), updatedItem),
+          setDoc(doc(db, 'revenues', revenueId), newRevenue)
+        ]);
       } catch (err) {
-        console.error('Error adding client to Supabase:', err);
+        handleFirestoreError(err, OperationType.WRITE, `clients/${generatedId}`);
       }
     } else {
       // Local demo mode fallback
@@ -191,13 +253,11 @@ export default function App() {
   };
 
   const handleUpdateClient = async (id: string, updated: Partial<Client>) => {
-    if (hasSupabaseConfig()) {
+    if (hasDatabaseConfig()) {
       try {
-        const { error } = await supabase.from('clients').update(updated).eq('id', id);
-        if (error) throw error;
-        await loadAllDataFromSupabase();
+        await updateDoc(doc(db, 'clients', id), updated as any);
       } catch (err) {
-        console.error('Error updating client in Supabase:', err);
+        handleFirestoreError(err, OperationType.WRITE, `clients/${id}`);
       }
     } else {
       setClients(prev => prev.map(item => item.id === id ? { ...item, ...updated } : item));
@@ -205,13 +265,11 @@ export default function App() {
   };
 
   const handleDeleteClient = async (id: string) => {
-    if (hasSupabaseConfig()) {
+    if (hasDatabaseConfig()) {
       try {
-        const { error } = await supabase.from('clients').delete().eq('id', id);
-        if (error) throw error;
-        await loadAllDataFromSupabase();
+        await deleteDoc(doc(db, 'clients', id));
       } catch (err) {
-        console.error('Error deleting client in Supabase:', err);
+        handleFirestoreError(err, OperationType.DELETE, `clients/${id}`);
       }
     } else {
       setClients(prev => prev.filter(item => item.id !== id));
@@ -227,13 +285,11 @@ export default function App() {
       ...payload
     };
 
-    if (hasSupabaseConfig()) {
+    if (hasDatabaseConfig()) {
       try {
-        const { error } = await supabase.from('expenses').insert([newItem]);
-        if (error) throw error;
-        await loadAllDataFromSupabase();
+        await setDoc(doc(db, 'expenses', generatedId), newItem);
       } catch (err) {
-        console.error('Error adding expense to Supabase:', err);
+        handleFirestoreError(err, OperationType.WRITE, `expenses/${generatedId}`);
       }
     } else {
       setExpenses(prev => [newItem, ...prev]);
@@ -241,13 +297,11 @@ export default function App() {
   };
 
   const handleUpdateExpense = async (id: string, updated: Partial<Expense>) => {
-    if (hasSupabaseConfig()) {
+    if (hasDatabaseConfig()) {
       try {
-        const { error } = await supabase.from('expenses').update(updated).eq('id', id);
-        if (error) throw error;
-        await loadAllDataFromSupabase();
+        await updateDoc(doc(db, 'expenses', id), updated as any);
       } catch (err) {
-        console.error('Error updating expense in Supabase:', err);
+        handleFirestoreError(err, OperationType.WRITE, `expenses/${id}`);
       }
     } else {
       setExpenses(prev => prev.map(item => item.id === id ? { ...item, ...updated } : item));
@@ -255,13 +309,11 @@ export default function App() {
   };
 
   const handleDeleteExpense = async (id: string) => {
-    if (hasSupabaseConfig()) {
+    if (hasDatabaseConfig()) {
       try {
-        const { error } = await supabase.from('expenses').delete().eq('id', id);
-        if (error) throw error;
-        await loadAllDataFromSupabase();
+        await deleteDoc(doc(db, 'expenses', id));
       } catch (err) {
-        console.error('Error deleting expense in Supabase:', err);
+        handleFirestoreError(err, OperationType.DELETE, `expenses/${id}`);
       }
     } else {
       setExpenses(prev => prev.filter(item => item.id !== id));
@@ -276,13 +328,11 @@ export default function App() {
       ...payload
     };
 
-    if (hasSupabaseConfig()) {
+    if (hasDatabaseConfig()) {
       try {
-        const { error } = await supabase.from('revenues').insert([newItem]);
-        if (error) throw error;
-        await loadAllDataFromSupabase();
+        await setDoc(doc(db, 'revenues', generatedId), newItem);
       } catch (err) {
-        console.error('Error adding revenue to Supabase:', err);
+        handleFirestoreError(err, OperationType.WRITE, `revenues/${generatedId}`);
       }
     } else {
       setRevenues(prev => [newItem, ...prev]);
@@ -290,13 +340,11 @@ export default function App() {
   };
 
   const handleUpdateRevenue = async (id: string, updated: Partial<RevenueLog>) => {
-    if (hasSupabaseConfig()) {
+    if (hasDatabaseConfig()) {
       try {
-        const { error } = await supabase.from('revenues').update(updated).eq('id', id);
-        if (error) throw error;
-        await loadAllDataFromSupabase();
+        await updateDoc(doc(db, 'revenues', id), updated as any);
       } catch (err) {
-        console.error('Error updating revenue in Supabase:', err);
+        handleFirestoreError(err, OperationType.WRITE, `revenues/${id}`);
       }
     } else {
       setRevenues(prev => prev.map(item => item.id === id ? { ...item, ...updated } : item));
@@ -304,13 +352,11 @@ export default function App() {
   };
 
   const handleDeleteRevenue = async (id: string) => {
-    if (hasSupabaseConfig()) {
+    if (hasDatabaseConfig()) {
       try {
-        const { error } = await supabase.from('revenues').delete().eq('id', id);
-        if (error) throw error;
-        await loadAllDataFromSupabase();
+        await deleteDoc(doc(db, 'revenues', id));
       } catch (err) {
-        console.error('Error deleting revenue in Supabase:', err);
+        handleFirestoreError(err, OperationType.DELETE, `revenues/${id}`);
       }
     } else {
       setRevenues(prev => prev.filter(item => item.id !== id));
@@ -325,13 +371,11 @@ export default function App() {
       ...payload
     };
 
-    if (hasSupabaseConfig()) {
+    if (hasDatabaseConfig()) {
       try {
-        const { error } = await supabase.from('collaborators').insert([newItem]);
-        if (error) throw error;
-        await loadAllDataFromSupabase();
+        await setDoc(doc(db, 'collaborators', generatedId), newItem);
       } catch (err) {
-        console.error('Error adding collaborator to Supabase:', err);
+        handleFirestoreError(err, OperationType.WRITE, `collaborators/${generatedId}`);
       }
     } else {
       setCollaborators(prev => [newItem, ...prev]);
@@ -339,13 +383,11 @@ export default function App() {
   };
 
   const handleUpdateCollaborator = async (id: string, updated: Partial<Collaborator>) => {
-    if (hasSupabaseConfig()) {
+    if (hasDatabaseConfig()) {
       try {
-        const { error } = await supabase.from('collaborators').update(updated).eq('id', id);
-        if (error) throw error;
-        await loadAllDataFromSupabase();
+        await updateDoc(doc(db, 'collaborators', id), updated as any);
       } catch (err) {
-        console.error('Error updating collaborator in Supabase:', err);
+        handleFirestoreError(err, OperationType.WRITE, `collaborators/${id}`);
       }
     } else {
       setCollaborators(prev => prev.map(item => item.id === id ? { ...item, ...updated } : item));
@@ -353,13 +395,11 @@ export default function App() {
   };
 
   const handleDeleteCollaborator = async (id: string) => {
-    if (hasSupabaseConfig()) {
+    if (hasDatabaseConfig()) {
       try {
-        const { error } = await supabase.from('collaborators').delete().eq('id', id);
-        if (error) throw error;
-        await loadAllDataFromSupabase();
+        await deleteDoc(doc(db, 'collaborators', id));
       } catch (err) {
-        console.error('Error deleting collaborator in Supabase:', err);
+        handleFirestoreError(err, OperationType.DELETE, `collaborators/${id}`);
       }
     } else {
       setCollaborators(prev => prev.filter(item => item.id !== id));
@@ -442,6 +482,11 @@ export default function App() {
   }
 
   const handleLogout = () => {
+    try {
+      auth.signOut();
+    } catch (err) {
+      console.warn('Silent signout error:', err);
+    }
     localStorage.removeItem('vexis_logged_in');
     setIsLoggedIn(false);
   };

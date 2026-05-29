@@ -1,0 +1,90 @@
+{
+  "entities": {
+    "client": {
+      "title": "Client",
+      "description": "Vexis agency contract client details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique Client ID" },
+        "name": { "type": "string", "description": "Company name of client" },
+        "email": { "type": "string", "format": "email", "description": "Primary client email" },
+        "phone": { "type": "string", "description": "Contact phone number" },
+        "cnpj": { "type": "string", "description": "CNPJ tax registration" },
+        "planName": { "type": "string", "description": "SaaS / Service plan name" },
+        "contractType": { "type": "string", "enum": ["MRR", "TCV"], "description": "Contract billing style" },
+        "monthlyValue": { "type": "number", "description": "Billing amount in BRL" },
+        "contractMonths": { "type": "number", "description": "Contract lifecycle in months" },
+        "startDate": { "type": "string", "description": "Contract start date string formatted" },
+        "endDate": { "type": "string", "description": "Contract expiration date string formatted" },
+        "status": { "type": "string", "enum": ["active", "at_risk", "delayed", "cancelled", "finished"], "description": "Operational health of client" },
+        "lastPaymentDate": { "type": "string", "description": "Last recorded pay invoice" }
+      },
+      "required": ["id", "name", "email", "contractType", "monthlyValue", "status"]
+    },
+    "expense": {
+      "title": "Expense",
+      "description": "Expense log tracking agency outgoings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique Expense ID" },
+        "category": { "type": "string", "enum": ["Impostos", "Ferramentas", "Funcionários", "Tráfego Pago", "Operacional", "Freelancers", "Outros"], "description": "Category segment" },
+        "value": { "type": "number", "description": "Outgoing value in BRL" },
+        "description": { "type": "string", "description": "Description of purchase" },
+        "date": { "type": "string", "description": "Formatted date" },
+        "frequency": { "type": "string", "enum": ["unica", "mensal", "recorrente"], "description": "Payment scheduling category" },
+        "observation": { "type": "string", "description": "Additional annotation notes" }
+      },
+      "required": ["id", "category", "value", "description", "date", "frequency"]
+    },
+    "revenue": {
+      "title": "Revenue",
+      "description": "Revenue log tracking invoices generated from contracts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique Invoice ID" },
+        "clientId": { "type": "string", "description": "Associated Client ID reference" },
+        "clientName": { "type": "string", "description": "Denormalized client company name" },
+        "contractType": { "type": "string", "enum": ["MRR", "TCV"], "description": "Contract structure" },
+        "value": { "type": "number", "description": "Value of invoice to receive" },
+        "paymentStatus": { "type": "string", "enum": ["pago", "pendente", "atrasado"], "description": "Billing statement state" },
+        "dueDate": { "type": "string", "description": "Expiration date string" },
+        "entryDate": { "type": "string", "description": "Recorded payment receipt date if paid" }
+      },
+      "required": ["id", "clientId", "clientName", "contractType", "value", "paymentStatus", "dueDate"]
+    },
+    "collaborator": {
+      "title": "Collaborator",
+      "description": "Information about team, freelancers and consultants",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique Collaborator ID" },
+        "name": { "type": "string", "description": "Full legal name" },
+        "role": { "type": "string", "description": "Designation" },
+        "service": { "type": "string", "description": "Scope of works" },
+        "monthlyValue": { "type": "number", "description": "Payment index per lifecycle interval" },
+        "type": { "type": "string", "enum": ["Freelancer", "Fixo", "Prestador"], "description": "Operational hiring model" },
+        "startDate": { "type": "string", "description": "Enlistment start date" },
+        "status": { "type": "string", "enum": ["ativo", "inativo"], "description": "Current status" }
+      },
+      "required": ["id", "name", "role", "monthlyValue", "type", "status"]
+    }
+  },
+  "firestore": {
+    "clients": {
+      "schema": { "$ref": "client" },
+      "description": "Collection of business clients details"
+    },
+    "expenses": {
+      "schema": { "$ref": "expense" },
+      "description": "Collection of all agency billing cost items"
+    },
+    "revenues": {
+      "schema": { "$ref": "revenue" },
+      "description": "Collection of revenue receipts"
+    },
+    "collaborators": {
+      "schema": { "$ref": "collaborator" },
+      "description": "Collection of contractors and internal agency roster list"
+    }
+  }
+}

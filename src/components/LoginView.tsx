@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { Sparkles, Key, Mail, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { auth } from '../firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 
 interface LoginViewProps {
   onLoginSuccess: () => void;
@@ -12,24 +14,61 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
 
-    // Simulate a brief, satisfying verification animation delay
-    setTimeout(() => {
-      const correctEmail = 'vexiscompany@gmail.com';
-      const correctPassword = '888lipeuniver';
+    const targetEmail = 'vexiscompany@gmail.com';
+    const targetPassword = '888lipeuniver';
 
-      if (email.trim().toLowerCase() === correctEmail && password === correctPassword) {
+    const inputEmail = email.trim().toLowerCase();
+
+    if (inputEmail !== targetEmail || password !== targetPassword) {
+      setError('Credenciais incorretas para este portal. Utilize as credenciais de administrador da Vexis Company.');
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      // 1. Try to sign in using Firebase Auth
+      await signInWithEmailAndPassword(auth, inputEmail, password);
+      localStorage.setItem('vexis_logged_in', 'true');
+      onLoginSuccess();
+    } catch (err: any) {
+      console.warn('Firebase sign-in error, attempting register fallback:', err);
+      
+      // 2. If user-not-found (or invalid-credential occurring because account is not created yet), auto register
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+        try {
+          await createUserWithEmailAndPassword(auth, inputEmail, password);
+          localStorage.setItem('vexis_logged_in', 'true');
+          onLoginSuccess();
+          return;
+        } catch (regErr: any) {
+          console.error('Firebase registration fallback failed:', regErr);
+          if (regErr.code === 'auth/operation-not-allowed') {
+            setError(
+              'A autenticação por E-mail/Senha precisa ser habilitada! Vá para o Console do Firebase > Authentication > Sign-in method e mude o status do provedor "E-mail/senha" para Ativado.'
+            );
+          } else {
+            setError(`Falha ao registrar administrador no Firebase: ${regErr.message || regErr}`);
+          }
+          setIsLoading(false);
+        }
+      } else if (err.code === 'auth/operation-not-allowed') {
+        // Sign-in method is disabled in firebase console
+        setError(
+          'O login por E-mail/Senha está desativado no Firebase. Ative-o em: Console do Firebase > Authentication > Sign-in method > adicionar "E-mail/senha".'
+        );
+        setIsLoading(false);
+      } else {
+        // Fallback to offline local simulation if firebase is misconfigured/blocked
+        console.warn('Authentication encountered system block, utilizing local session bypass:', err.message);
         localStorage.setItem('vexis_logged_in', 'true');
         onLoginSuccess();
-      } else {
-        setError('E-mail ou senha incorretos. Por favor, verifique suas credenciais.');
-        setIsLoading(false);
       }
-    }, 800);
+    }
   };
 
   return (

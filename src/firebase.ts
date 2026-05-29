@@ -1,54 +1,78 @@
-import { createClient } from '@supabase/supabase-js';
+import { initializeApp } from 'firebase/app';
+import { getDocs, getFirestore, collection, writeBatch, doc, getDocFromServer } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
+import firebaseConfig from '../firebase-applet-config.json';
 import { Client, Expense, RevenueLog, Collaborator } from './types';
 
-// Helper to validate and optionally auto-prepend protocol
-const getNormalizedSupabaseConfig = () => {
-  let rawUrl = import.meta.env.VITE_SUPABASE_URL || '';
-  let rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const app = initializeApp(firebaseConfig);
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
+export const auth = getAuth();
 
-  if (typeof rawUrl === 'string') {
-    rawUrl = rawUrl.trim();
-    if (rawUrl && !/^https?:\/\//i.test(rawUrl)) {
-      rawUrl = `https://${rawUrl}`;
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+// Check connection on boot to prevent silent failures
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error("Please check your Firebase configuration.");
     }
   }
+}
+testConnection();
 
-  if (typeof rawKey === 'string') {
-    rawKey = rawKey.trim();
-  }
-
-  const isHttpOrHttps = (str: string) => {
-    try {
-      const parsed = new URL(str);
-      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-    } catch (_) {
-      return false;
-    }
-  };
-
-  const finalUrl = isHttpOrHttps(rawUrl) ? rawUrl : 'https://placeholder-project-url.supabase.co';
-  const finalKey = (rawKey && rawKey.length > 10) ? rawKey : 'placeholder-anon-key-prevent-crash';
-
-  return {
-    url: finalUrl,
-    key: finalKey,
-    isConfigured: isHttpOrHttps(rawUrl) && 
-                  rawUrl !== 'https://placeholder-project-url.supabase.co' && 
-                  !!rawKey && 
-                  rawKey !== 'placeholder-anon-key-prevent-crash' && 
-                  rawKey.length > 10
-  };
+// Direct flag indicating configuration is valid
+export const hasFirebaseConfig = () => {
+  return !!firebaseConfig.apiKey && firebaseConfig.apiKey !== '' && !firebaseConfig.apiKey.startsWith('PLACEHOLDER');
 };
 
-const config = getNormalizedSupabaseConfig();
-
-export const supabase = createClient(config.url, config.key);
-
-export const hasSupabaseConfig = () => {
-  return getNormalizedSupabaseConfig().isConfigured;
-};
-
-// Seed dataset matching original firebase seeds in case tables are completely empty
+// Seed lists
 export const initialClients: Client[] = [
   {
     id: 'cli-1',
@@ -310,124 +334,28 @@ export const initialCollaborators: Collaborator[] = [
   { id: 'col-5', name: 'Igor Santos', role: 'Fotógrafo imobiliário', service: 'Sessão de fotos de luxo decorado', monthlyValue: 2000, type: 'Prestador', startDate: '2026-05-10', status: 'ativo' }
 ];
 
-// Seed databases if empty
 export async function seedDatabaseIfEmpty() {
-  if (!hasSupabaseConfig()) return;
+  if (!hasFirebaseConfig()) return;
 
-  const checkTable = async (tableName: string, initialData: any[]) => {
+  const checkAndSeed = async (collectionName: string, initialData: any[]) => {
     try {
-      const { data, error } = await supabase.from(tableName).select('id').limit(1);
-      if (error) {
-        console.warn(`Could not select from table ${tableName}. You might need to create it in your Supabase SQL editor.`, error);
-        return;
-      }
-
-      if (!data || data.length === 0) {
-        console.log(`Seeding Supabase table: ${tableName}...`);
-        const { error: insertError } = await supabase.from(tableName).insert(initialData);
-        if (insertError) {
-          console.error(`Error seeding ${tableName}:`, insertError);
-        }
+      const snap = await getDocs(collection(db, collectionName));
+      if (snap.empty) {
+        console.log(`Seeding Firestore collection: ${collectionName}...`);
+        const batch = writeBatch(db);
+        initialData.forEach((item) => {
+          const docRef = doc(db, collectionName, item.id);
+          batch.set(docRef, item);
+        });
+        await batch.commit();
       }
     } catch (err) {
-      console.error(`Error seeding table ${tableName}`, err);
+      console.error(`Error checking/seeding Firestore collection ${collectionName}:`, err);
     }
   };
 
-  await checkTable('clients', initialClients);
-  await checkTable('expenses', initialExpenses);
-  await checkTable('revenues', initialRevenues);
-  await checkTable('collaborators', initialCollaborators);
+  await checkAndSeed('clients', initialClients);
+  await checkAndSeed('expenses', initialExpenses);
+  await checkAndSeed('revenues', initialRevenues);
+  await checkAndSeed('collaborators', initialCollaborators);
 }
-
-// SQL Script generator for Supabase
-export const getSupabaseSetupSQL = () => {
-  return `-- SQL CODE FOR SUPABASE SQL EDITOR:
--- Run this code inside the SQL Editor of your Supabase Project (https://supabase.com)
-
--- 1. Create CLIENTS table
-CREATE TABLE IF NOT EXISTS public.clients (
-    id text NOT NULL PRIMARY KEY,
-    name text NOT NULL,
-    email text NOT NULL,
-    phone text,
-    cnpj text,
-    "planName" text,
-    "contractType" text NOT NULL,
-    "monthlyValue" numeric NOT NULL,
-    "contractMonths" integer NOT NULL,
-    "startDate" text,
-    "endDate" text,
-    status text NOT NULL,
-    "lastPaymentDate" text,
-    created_at timestamp with time zone DEFAULT now()
-);
-
--- 2. Create EXPENSES table
-CREATE TABLE IF NOT EXISTS public.expenses (
-    id text NOT NULL PRIMARY KEY,
-    category text NOT NULL,
-    value numeric NOT NULL,
-    description text NOT NULL,
-    date text NOT NULL,
-    frequency text NOT NULL,
-    observation text,
-    created_at timestamp with time zone DEFAULT now()
-);
-
--- 3. Create REVENUES table
-CREATE TABLE IF NOT EXISTS public.revenues (
-    id text NOT NULL PRIMARY KEY,
-    "clientId" text NOT NULL,
-    "clientName" text NOT NULL,
-    "contractType" text NOT NULL,
-    value numeric NOT NULL,
-    "paymentStatus" text NOT NULL,
-    "dueDate" text NOT NULL,
-    "entryDate" text,
-    created_at timestamp with time zone DEFAULT now()
-);
-
--- 4. Create COLLABORATORS table
-CREATE TABLE IF NOT EXISTS public.collaborators (
-    id text NOT NULL PRIMARY KEY,
-    name text NOT NULL,
-    role text NOT NULL,
-    service text,
-    "monthlyValue" numeric NOT NULL,
-    type text NOT NULL,
-    "startDate" text,
-    status text NOT NULL,
-    created_at timestamp with time zone DEFAULT now()
-);
-
--- 5. Disable Row Level Security (RLS) to run freely, or insert permissive policies
--- Option A: Enable simple permissive policies for easy development:
--- (Uncomment below to enable policies)
-
-ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.expenses ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.revenues ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.collaborators ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Allow public select" ON public.clients FOR SELECT TO public USING (true);
-CREATE POLICY "Allow public insert" ON public.clients FOR INSERT TO public WITH CHECK (true);
-CREATE POLICY "Allow public update" ON public.clients FOR UPDATE TO public USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public delete" ON public.clients FOR DELETE TO public USING (true);
-
-CREATE POLICY "Allow public select" ON public.expenses FOR SELECT TO public USING (true);
-CREATE POLICY "Allow public insert" ON public.expenses FOR INSERT TO public WITH CHECK (true);
-CREATE POLICY "Allow public update" ON public.expenses FOR UPDATE TO public USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public delete" ON public.expenses FOR DELETE TO public USING (true);
-
-CREATE POLICY "Allow public select" ON public.revenues FOR SELECT TO public USING (true);
-CREATE POLICY "Allow public insert" ON public.revenues FOR INSERT TO public WITH CHECK (true);
-CREATE POLICY "Allow public update" ON public.revenues FOR UPDATE TO public USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public delete" ON public.revenues FOR DELETE TO public USING (true);
-
-CREATE POLICY "Allow public select" ON public.collaborators FOR SELECT TO public USING (true);
-CREATE POLICY "Allow public insert" ON public.collaborators FOR INSERT TO public WITH CHECK (true);
-CREATE POLICY "Allow public update" ON public.collaborators FOR UPDATE TO public USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public delete" ON public.collaborators FOR DELETE TO public USING (true);
-`;
-};

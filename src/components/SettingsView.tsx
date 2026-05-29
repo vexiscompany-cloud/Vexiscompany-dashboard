@@ -13,7 +13,8 @@ import {
   Terminal,
   ExternalLink
 } from 'lucide-react';
-import { hasSupabaseConfig, getSupabaseSetupSQL } from '../supabase';
+import { hasFirebaseConfig } from '../firebase';
+import firebaseConfig from '../../firebase-applet-config.json';
 
 interface SettingsViewProps {
   monthlyTarget: number;
@@ -31,15 +32,8 @@ export default function SettingsView({
   const [companyEmail, setCompanyEmail] = useState('diretoria@vexiscompany.com.br');
   const [companyCnpj, setCompanyCnpj] = useState('44.921.054/0001-38');
   const [savedSuccess, setSavedSuccess] = useState(false);
-  const [copied, setCopied] = useState(false);
 
-  const isSupabaseConnected = hasSupabaseConfig();
-
-  const handleCopySQL = () => {
-    navigator.clipboard.writeText(getSupabaseSetupSQL());
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const isFirebaseConnected = hasFirebaseConfig();
 
   const handleSubmit = (e: React.FormEvent) => {
      e.preventDefault();
@@ -156,7 +150,7 @@ export default function SettingsView({
               {savedSuccess && (
                 <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold flex items-center gap-2">
                   <Check className="w-4 h-4 text-emerald-400" />
-                  Preferências e meta faturamento salvas com sucesso no banco de dados!
+                  Meta de faturamento mensal salva com sucesso!
                 </div>
               )}
 
@@ -176,8 +170,8 @@ export default function SettingsView({
           {/* Database & Cloud Telemetry Information Card */}
           <div className="bg-[#121216] border border-[#222227] rounded-xl p-5 shadow-xl relative overflow-hidden">
             <h2 className="text-sm font-extrabold text-white mb-4 flex items-center gap-2">
-              <Database className="w-4 h-4 text-emerald-400" />
-              Conexão com Banco de Dados Supabase (PostgreSQL)
+              <Database className="w-4 h-4 text-[#A855F7]" />
+              Conexão com Banco de Dados Google Cloud Firebase
             </h2>
             
             <div className="space-y-4 text-xs">
@@ -185,11 +179,11 @@ export default function SettingsView({
               <div className="p-3 bg-[#171A21] border border-zinc-900 rounded-lg space-y-2 font-mono text-[11px] leading-relaxed">
                 <div className="flex justify-between">
                   <span className="text-zinc-500 font-sans">PROVEDOR CLOUD:</span>
-                  <span className="text-white font-bold font-sans">Supabase Cloud</span>
+                  <span className="text-white font-bold font-sans">Google Firebase (Firestore)</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-zinc-500 font-sans">ESTADO DE CONEXÃO:</span>
-                  {isSupabaseConnected ? (
+                  {isFirebaseConnected ? (
                     <span className="text-emerald-400 font-extrabold text-xs flex items-center gap-1 font-sans">
                       <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                       CONECTADO (REAL-TIME ATIVO)
@@ -201,87 +195,33 @@ export default function SettingsView({
                     </span>
                   )}
                 </div>
-                {isSupabaseConnected && (
-                  <div className="flex justify-between border-t border-zinc-900/40 pt-1.5 mt-1.5">
-                    <span className="text-zinc-500 font-sans">URL DO BANCO:</span>
-                    <span className="text-zinc-400 font-mono truncate max-w-[200px]" title={import.meta.env.VITE_SUPABASE_URL}>
-                      {import.meta.env.VITE_SUPABASE_URL}
-                    </span>
-                  </div>
+                {isFirebaseConnected && (
+                  <>
+                    <div className="flex justify-between border-t border-zinc-900/40 pt-1.5 mt-1.5 font-mono text-[10px]">
+                      <span className="text-zinc-500 font-sans">PROJECT ID:</span>
+                      <span className="text-zinc-400 truncate max-w-[240px]">
+                        {firebaseConfig.projectId}
+                      </span>
+                    </div>
+                    <div className="flex justify-between font-mono text-[10px]">
+                      <span className="text-zinc-500 font-sans">DATABASE ID:</span>
+                      <span className="text-zinc-400 truncate max-w-[240px]">
+                        {firebaseConfig.firestoreDatabaseId}
+                      </span>
+                    </div>
+                  </>
                 )}
               </div>
 
-              {!isSupabaseConnected && (
+              {isFirebaseConnected ? (
+                <div className="p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-lg text-emerald-400 text-[11px] leading-normal font-sans">
+                  <strong>Dashboard Sincronizado:</strong> Os dados deste portal estão totalmente integrados ao Firebase Firestore. Toda inserção, atualização ou exclusão de clientes, custos, receitas e folha de colaboradores é persistida em tempo real e protegida por regras rígidas de segurança Zero-Trust!
+                </div>
+              ) : (
                 <div className="p-3 bg-amber-500/5 border border-amber-500/20 rounded-lg text-amber-300 text-[11px] leading-normal font-sans">
-                  <strong>Nota Importante:</strong> O painel está em modo offline utilizando dados mockados locais. Todas as alterações que fizer agora serão salvas em seu navegador (estado local). Para conectar à sua própria conta Supabase segura, siga o guia passo a passo a seguir.
+                  <strong>Painel em Modo Demo:</strong> O portal não detectou uma configuração ativa do Firebase. Está operando via LocalStorage para demonstração offline.
                 </div>
               )}
-
-              {/* Guia Passo a Passo Supabase */}
-              <div className="border-t border-[#222227] pt-4 mt-4 space-y-3 font-sans">
-                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block flex items-center gap-1.5">
-                  <Terminal className="w-3.5 h-3.5 text-emerald-400" />
-                  COMO CONFIGURAR SEU SUPABASE (PASSO A PASSO)
-                </span>
-
-                <div className="space-y-3 text-[11px] text-zinc-400 leading-normal">
-                  <p>
-                    <span className="text-emerald-400 font-bold">Passo 1:</span> Acesse o{' '}
-                    <a href="https://supabase.com" target="_blank" rel="noreferrer" className="text-emerald-400 underline inline-flex items-center gap-0.5 hover:text-emerald-300">
-                      Supabase Dashboard <ExternalLink className="w-3 h-3" />
-                    </a>{' '}
-                    e crie um novo projeto gratuito.
-                  </p>
-
-                  <p>
-                    <span className="text-emerald-400 font-bold">Passo 2:</span> No menu esquerdo, vá em{' '}
-                    <strong className="text-white">SQL Editor</strong>, clique em <strong className="text-white">New query</strong>, cole o script SQL abaixo e clique em <strong className="text-white">Run (Executar)</strong> para criar as tabelas do dashboard automagicamente:
-                  </p>
-
-                  {/* SQL Code Box with rich Copy button */}
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between items-center bg-zinc-950 px-3 py-1.5 rounded-t-lg border border-zinc-900 border-b-0">
-                      <span className="text-[9px] font-bold text-zinc-500 font-mono">SUPABASE_SCHEMA.SQL</span>
-                      <button 
-                        onClick={handleCopySQL} 
-                        type="button"
-                        className="text-zinc-400 hover:text-white flex items-center gap-1 font-sans text-[10px] font-bold cursor-pointer transition-colors"
-                      >
-                        {copied ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-emerald-400" /> Copiado!
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5" /> Copiar SQL Script
-                          </>
-                        )}
-                      </button>
-                    </div>
-                    <pre className="p-3 bg-zinc-950 border border-zinc-900 text-zinc-400 font-mono text-[9px] rounded-b-lg overflow-x-auto max-h-[140px] leading-relaxed">
-                      {getSupabaseSetupSQL()}
-                    </pre>
-                  </div>
-
-                  <p>
-                    <span className="text-emerald-400 font-bold">Passo 3:</span> Vá em{' '}
-                    <strong className="text-white">Project Settings</strong> &gt; <strong className="text-white">API</strong> e copie os valores de <strong className="text-white">Project URL</strong> e <strong className="text-white">anon public (API Key)</strong>.
-                  </p>
-
-                  <p>
-                    <span className="text-emerald-400 font-bold">Passo 4:</span> No canto inferior esquerdo do Google AI Studio, acesse a engrenagem de <strong className="text-white">Settings</strong> (Configurações) / Credentials e adicione duas novas variáveis com os respectivos valores recém-copiados:
-                  </p>
-
-                  <div className="p-2 bg-[#171A21] border border-zinc-900 rounded font-mono text-[10px] leading-relaxed text-zinc-300">
-                    <div><span className="text-emerald-400 font-bold">VITE_SUPABASE_URL</span> = <span className="text-zinc-500">https://seu-projeto.supabase.co</span></div>
-                    <div><span className="text-emerald-400 font-bold">VITE_SUPABASE_ANON_KEY</span> = <span className="text-zinc-500">eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...</span></div>
-                  </div>
-
-                  <p className="text-[10px] text-zinc-500 italic">
-                    Assim que as chaves forem salvas nas credenciais do ambiente do AI Studio, as tabelas do Supabase serão sincronizadas instantaneamente e em tempo real!
-                  </p>
-                </div>
-              </div>
             </div>
           </div>
 

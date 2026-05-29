@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // First, default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Auth state helper
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Role verification
+    function isOwner() {
+      return isSignedIn() && request.auth.token.email == 'vexiscompany@gmail.com';
+    }
+
+    // 1. Clients Match Block
+    match /clients/{clientId} {
+      allow read, write: if isOwner();
+    }
+
+    // 2. Expenses Match Block
+    match /expenses/{expenseId} {
+      allow read, write: if isOwner();
+    }
+
+    // 3. Revenues Match Block
+    match /revenues/{revenueId} {
+      allow read, write: if isOwner();
+    }
+
+    // 4. Collaborators Match Block
+    match /collaborators/{collaboratorId} {
+      allow read, write: if isOwner();
+    }
+  }
+}
