@@ -1,0 +1,6 @@
+{
+  "name": "Vexis Company Dashboard",
+  "description": "Premium real estate marketing financial dashboard for Vexis Company",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer utilities {
+  /* Smooth animations helper */
+  .transition-all-custom {
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
